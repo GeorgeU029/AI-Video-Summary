@@ -54,3 +54,6 @@ python app.py
 
 ## Evaluation Methods
 The project will be evaluated using the SumMe and TVSum datasets, comparing AI-generated summaries against human-generated ones using metrics such as F-score, precision, and recall.
+
+## Requirments 
+pip install opencv-python moviepy pytube numpy scikit-learn transformers torch pillow
