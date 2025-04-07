@@ -1,12 +1,12 @@
-#AI VIDEO SUMMARIZER 
+# AI VIDEO SUMMARIZER 
 
 
 
 --
-###Backend: 
+### Backend: 
 
 --
-###Frontend: 
+### Frontend: 
 ```cd ./frontend```
 ```npm install```
 ```npm run dev```
