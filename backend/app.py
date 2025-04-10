@@ -9,7 +9,9 @@ from openai import OpenAI
 import uuid
 import logging
 from werkzeug.utils import secure_filename
+import pathlib
 
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
@@ -134,10 +136,10 @@ def transcribe_video(video_path):
 
     return transcript_segments, transcript_text, output_filename
 
-def summarize_transcript(transcript_text, api_key=None):
+def summarize_transcript(transcript_text):
     try:
         # Use hardcoded API key
-        api_key = "" #PUT THE KEY HERE
+        api_key = ""  # PUT THE KEY HERE
         client = OpenAI(api_key=api_key)
 
         # Create the completion request for summarization
@@ -192,31 +194,24 @@ def handle_options(path):
 def upload_video():
     # Log request information for debugging
     logger.info(f"Upload endpoint accessed with method: {request.method}")
-    logger.info(f"Headers: {request.headers}")
     
     # Handle OPTIONS method for CORS preflight requests
     if request.method == 'OPTIONS':
-        logger.info("Handling OPTIONS request")
         return '', 200
         
     # Handle GET request (for browser access)
     if request.method == 'GET':
-        logger.info("Handling GET request to upload endpoint")
         return jsonify({
             'status': 'error',
             'message': 'This endpoint only accepts POST requests for file uploads. Use a POST request with a form containing a file field named "file".'
         }), 400
     
     # Handle POST request
-    logger.info("Processing POST request to upload endpoint")
-    
     if 'file' not in request.files:
         logger.error("No file part in the request")
         return jsonify({'error': 'No file part'}), 400
 
     file = request.files['file']
-    logger.info(f"File received: {file.filename}")
-
     if file.filename == '':
         logger.error("No selected file")
         return jsonify({'error': 'No selected file'}), 400
@@ -226,11 +221,7 @@ def upload_video():
         filename = secure_filename(file.filename)
         unique_filename = f"{uuid.uuid4()}_{filename}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-
-        logger.info(f"Saving file to: {filepath}")
         file.save(filepath)
-        logger.info(f"File saved successfully")
-
         return jsonify({
             'success': True,
             'message': 'File uploaded successfully',
@@ -238,7 +229,6 @@ def upload_video():
             'filename': unique_filename
         })
     else:
-        logger.error(f"File type not allowed: {file.filename}")
         return jsonify({'error': 'File type not allowed'}), 400
 
 @app.route('/api/process', methods=['GET', 'POST', 'OPTIONS'])
@@ -246,45 +236,29 @@ def process_video():
     # Handle OPTIONS method for CORS preflight requests
     if request.method == 'OPTIONS':
         return '', 200
-        
-    # Handle GET request (for browser access)
-    if request.method == 'GET':
-        return jsonify({
-            'status': 'error',
-            'message': 'This endpoint only accepts POST requests. Send a JSON object with a "filepath" property.'
-        }), 400
-        
-    # Handle POST request
-    logger.info("Process endpoint accessed with POST")
+
     data = request.json
-    logger.info(f"Process request data: {data}")
 
     if not data or 'filepath' not in data:
-        logger.error("No filepath provided")
         return jsonify({'error': 'No filepath provided'}), 400
 
     filepath = data['filepath']
-    logger.info(f"Processing filepath: {filepath}")
+    filepath = os.path.abspath(filepath)
+    filepath = str(pathlib.Path(filepath))  # Normalize slashes for cross-platform compatibility
 
     if not os.path.exists(filepath):
-        logger.error(f"File not found: {filepath}")
         return jsonify({'error': 'File not found'}), 404
 
     try:
         # Extract frames
-        frame_gap = int(data.get('frame_gap', 300))  # Default: extract a frame every 10 seconds at 30fps
-        logger.info(f"Extracting frames with gap: {frame_gap}")
+        frame_gap = int(data.get('frame_gap', 300))  # Default: extract a frame every 10 seconds
         frames_path, extracted_frames = save_frame(filepath, FRAMES_DIR, gap=frame_gap)
 
         # Transcribe video
-        logger.info("Starting transcription")
         transcript_segments, transcript_text, transcript_file = transcribe_video(filepath)
-        logger.info("Transcription complete")
 
-        # Always summarize with hardcoded API key
-        logger.info("Starting summarization")
+        # Summarize
         summary = summarize_transcript(transcript_text)
-        logger.info("Summarization complete")
 
         return jsonify({
             'success': True,
@@ -297,41 +271,10 @@ def process_video():
         })
 
     except Exception as e:
-        logger.error(f"Error processing video: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/summarize', methods=['GET', 'POST', 'OPTIONS'])
-def summarize_api():
-    # Handle OPTIONS method for CORS preflight requests
-    if request.method == 'OPTIONS':
-        return '', 200
-        
-    # Handle GET request (for browser access)
-    if request.method == 'GET':
-        return jsonify({
-            'status': 'error',
-            'message': 'This endpoint only accepts POST requests. Send a JSON object with a "transcript" property.'
-        }), 400
-        
-    # Handle POST request
-    data = request.json
-
-    if not data or 'transcript' not in data:
-        return jsonify({'error': 'Missing transcript'}), 400
-
-    try:
-        summary = summarize_transcript(data['transcript'])
-        return jsonify({
-            'success': True,
-            'summary': summary
-        })
-    except Exception as e:
-        logger.error(f"Error summarizing transcript: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/test', methods=['GET', 'OPTIONS'])
 def test_api():
-    # Handle OPTIONS method for CORS preflight requests
     if request.method == 'OPTIONS':
         return '', 200
         
@@ -356,9 +299,4 @@ def after_request(response):
 
 # Run the application
 if __name__ == '__main__':
-    print("\n\n========================================")
-    print("API IS RUNNING! USE THIS URL IN YOUR FRONTEND:")
-    print("http://localhost:5000/api")
-    print("========================================\n\n")
-    
     app.run(host='0.0.0.0', port=5000, debug=True)
