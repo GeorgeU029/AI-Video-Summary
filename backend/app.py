@@ -166,5 +166,4 @@ def after_request(response):
 
 # === START ===
 if __name__ == '__main__':
-    logger.info("🚀 Starting server with local Whisper + OpenAI GPT...")
     app.run(host='0.0.0.0', port=5000, debug=True)
