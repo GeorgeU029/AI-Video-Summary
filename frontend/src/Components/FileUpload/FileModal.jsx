@@ -110,14 +110,35 @@ function FileModal({ isOpen, onClose, onFileUpload }) {
       setUploadProgress(50);
       
       // Step 2: Process the uploaded video
-      console.log('Processing file:', uploadData.filepath);
+      // Handle both filename and filepath scenarios
+      let filenameToProcess;
+      
+      // Log full response for debugging
+      console.log('Full upload response:', uploadData);
+      
+      // Check if we have the filename directly
+      if (uploadData.filename) {
+        filenameToProcess = uploadData.filename;
+        console.log('Using filename from server response:', filenameToProcess);
+      } 
+      // Fallback to extracting from filepath if filename is not provided
+      else if (uploadData.filepath) {
+        const serverFilepath = uploadData.filepath;
+        filenameToProcess = serverFilepath.split('/').pop().split('\\').pop();
+        console.log('Extracted filename from filepath:', filenameToProcess);
+      } else {
+        throw new Error('Server did not return filename or filepath');
+      }
+      
+      console.log('Processing file with filename:', filenameToProcess);
+      
       const processResponse = await fetch(`${API_URL}/api/process`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          filepath: uploadData.filepath
+          filename: filenameToProcess
         })
       });
 
@@ -125,11 +146,18 @@ function FileModal({ isOpen, onClose, onFileUpload }) {
       if (!processResponse.ok) {
         let errorDetail = '';
         try {
-          const errorBody = await processResponse.text();
+          const errorBody = await processResponse.json();
           console.error('Processing error response:', errorBody);
-          errorDetail = errorBody;
+          errorDetail = JSON.stringify(errorBody);
         } catch (e) {
-          console.error('Could not read error response:', e);
+          try {
+            // Try as text if JSON fails
+            const textBody = await processResponse.text();
+            errorDetail = textBody;
+          } catch (textError) {
+            console.error('Could not read error response:', e);
+            errorDetail = 'Unknown error';
+          }
         }
         throw new Error(`Processing failed (${processResponse.status} ${processResponse.statusText}): ${errorDetail}`);
       }
