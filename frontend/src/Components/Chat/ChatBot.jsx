@@ -17,26 +17,22 @@ function ChatBot() {
   const [videoFrames, setVideoFrames] = useState([]);
   const [videoData, setVideoData] = useState(null);
 
-  // API URL - change this to your Flask API endpoint
   const API_URL = 'http://localhost:5000/api';
 
-  // Function to handle sending a text message
   const handleSendMessage = async (messageText) => {
     if (!messageText.trim()) return;
-    
-    // Add user message
+
     const userMessage = {
       id: Date.now(),
       text: messageText,
       sender: "user",
       timestamp: new Date().toISOString()
     };
-    
-    setMessages(prevMessages => [...prevMessages, userMessage]);
-    
-    // Check if the message is related to the current video
+
+    setMessages(prev => [...prev, userMessage]);
+
+    // Handle summary request from processed data
     if (videoData && messageText.toLowerCase().includes('summary')) {
-      // If we already have a summary, show it
       if (videoData.processedData.summary) {
         const aiMessage = {
           id: Date.now() + 1,
@@ -44,185 +40,160 @@ function ChatBot() {
           sender: "ai",
           timestamp: new Date().toISOString()
         };
-        
-        setMessages(prevMessages => [...prevMessages, aiMessage]);
-      } else {
-        // If we don't have a summary but we have a transcript, get a summary
-        try {
-          const loadingMessage = {
-            id: Date.now() + 1,
-            text: "Generating summary...",
-            sender: "ai",
-            timestamp: new Date().toISOString()
-          };
-          
-          setMessages(prevMessages => [...prevMessages, loadingMessage]);
-          
-          const response = await fetch(`${API_URL}/summarize`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              transcript: videoData.processedData.transcript_text
-            })
-          });
-          
-          if (!response.ok) {
-            throw new Error('Failed to generate summary');
+        setMessages(prev => [...prev, aiMessage]);
+        return;
+      }
+
+      // Else generate summary from transcript
+      try {
+        const loadingMessage = {
+          id: Date.now() + 1,
+          text: "Generating summary...",
+          sender: "ai",
+          timestamp: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, loadingMessage]);
+
+        const response = await fetch(`${API_URL}/summarize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transcript: videoData.processedData.transcript_text
+          })
+        });
+
+        if (!response.ok) throw new Error('Failed to generate summary');
+        const data = await response.json();
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const index = updated.findIndex(msg => msg.id === loadingMessage.id);
+          if (index !== -1) {
+            updated[index] = {
+              ...loadingMessage,
+              text: data.summary
+            };
           }
-          
-          const data = await response.json();
-          
-          // Replace the loading message with the actual summary
-          setMessages(prevMessages => {
-            const updatedMessages = [...prevMessages];
-            const loadingIndex = updatedMessages.findIndex(msg => msg.id === loadingMessage.id);
-            
-            if (loadingIndex !== -1) {
-              updatedMessages[loadingIndex] = {
-                ...loadingMessage,
-                text: data.summary
-              };
-            }
-            
-            return updatedMessages;
-          });
-          
-          // Update video data with the summary
-          setVideoData(prev => ({
-            ...prev,
-            processedData: {
-              ...prev.processedData,
-              summary: data.summary
-            }
-          }));
-        } catch (error) {
-          console.error('Error generating summary:', error);
-          const errorMessage = {
-            id: Date.now() + 2,
-            text: "Sorry, I couldn't generate a summary at this time. Please try again later.",
-            sender: "ai",
-            timestamp: new Date().toISOString()
-          };
-          
-          setMessages(prevMessages => [...prevMessages, errorMessage]);
-        }
-      }
-    } else if (messageText.toLowerCase().includes('frame') || messageText.toLowerCase().includes('timestamp')) {
-      // Show information about frames if requested
-      if (videoFrames && videoFrames.length > 0) {
-        const frameInfo = `I've extracted ${videoFrames.length} key frames from the video. Would you like to see them?`;
-        
-        const aiMessage = {
-          id: Date.now() + 1,
-          text: frameInfo,
+          return updated;
+        });
+
+        setVideoData(prev => ({
+          ...prev,
+          processedData: {
+            ...prev.processedData,
+            summary: data.summary
+          }
+        }));
+
+        return;
+
+      } catch (error) {
+        console.error('Summary error:', error);
+        setMessages(prev => [...prev, {
+          id: Date.now() + 2,
+          text: "Sorry, I couldn't generate a summary at this time.",
           sender: "ai",
           timestamp: new Date().toISOString()
-        };
-        
-        setMessages(prevMessages => [...prevMessages, aiMessage]);
-      } else {
-        const aiMessage = {
-          id: Date.now() + 1,
-          text: "No frames have been extracted yet. Please upload a video first.",
-          sender: "ai",
-          timestamp: new Date().toISOString()
-        };
-        
-        setMessages(prevMessages => [...prevMessages, aiMessage]);
+        }]);
+        return;
       }
-    } else {
-      // Default response for other messages
-      const aiMessage = {
+    }
+
+    // Frame/timestamp logic
+    if (messageText.toLowerCase().includes('frame') || messageText.toLowerCase().includes('timestamp')) {
+      const frameInfo = videoFrames.length > 0
+        ? `I've extracted ${videoFrames.length} key frames. Would you like to see them?`
+        : `No frames have been extracted yet. Please upload a video first.`;
+
+      setMessages(prev => [...prev, {
         id: Date.now() + 1,
-        text: getAiResponse(messageText, videoData),
+        text: frameInfo,
+        sender: "ai",
+        timestamp: new Date().toISOString()
+      }]);
+
+      return;
+    }
+
+    // 🤖 Send to ChatGPT w/ context
+    try {
+      const loadingMessage = {
+        id: Date.now() + 1,
+        text: "Thinking...",
         sender: "ai",
         timestamp: new Date().toISOString()
       };
-      
-      setMessages(prevMessages => [...prevMessages, aiMessage]);
+
+      setMessages(prev => [...prev, loadingMessage]);
+
+      const response = await fetch(`${API_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: messageText,
+          context: videoData?.processedData?.summary || videoData?.processedData?.transcript_text || ""
+        })
+      });
+
+      const data = await response.json();
+
+      setMessages(prev => {
+        const updated = [...prev];
+        const idx = updated.findIndex(msg => msg.id === loadingMessage.id);
+        if (idx !== -1) {
+          updated[idx] = {
+            ...loadingMessage,
+            text: data.reply || "I couldn't come up with a response."
+          };
+        }
+        return updated;
+      });
+
+    } catch (error) {
+      console.error('ChatGPT error:', error);
+      const errorMessage = {
+        id: Date.now() + 2,
+        text: "Sorry, I couldn't respond right now. Try again later.",
+        sender: "ai",
+        timestamp: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, errorMessage]);
     }
   };
-  
-  // Function to handle file uploads
+
   const handleFileUpload = (fileData) => {
-    // Update the state with the processed file data
     setVideoData(fileData);
-    
-    if (fileData.processedData && fileData.processedData.frames) {
+    if (fileData.processedData?.frames) {
       setVideoFrames(fileData.processedData.frames);
     }
-    
-    // Add user message about the upload
+
     const userMessage = {
       id: Date.now(),
       text: `I've uploaded "${fileData.name}" for summarization.`,
       sender: "user",
       timestamp: new Date().toISOString()
     };
-    
-    setMessages(prevMessages => [...prevMessages, userMessage]);
-    
-    // Add AI message with initial analysis
-    const initialAnalysis = `I've successfully processed "${fileData.name}" (${(fileData.size / (1024 * 1024)).toFixed(2)} MB).`;
-    
-    const analysisDetails = [];
-    
-    // Add transcript info if available
-    if (fileData.processedData && fileData.processedData.transcript_segments) {
-      const segmentCount = fileData.processedData.transcript_segments.length;
-      analysisDetails.push(`• Transcribed ${segmentCount} speech segments`);
+
+    const details = [];
+    if (fileData.processedData?.transcript_segments) {
+      details.push(`• Transcribed ${fileData.processedData.transcript_segments.length} speech segments`);
     }
-    
-    // Add frame extraction info if available
-    if (fileData.processedData && fileData.processedData.frames) {
-      const frameCount = fileData.processedData.frames.length;
-      analysisDetails.push(`• Extracted ${frameCount} key frames from the video`);
+    if (fileData.processedData?.frames) {
+      details.push(`• Extracted ${fileData.processedData.frames.length} key frames`);
     }
-    
-    // Add summary availability info
-    if (fileData.processedData && fileData.processedData.summary) {
-      analysisDetails.push(`• Generated a detailed summary of the content`);
+    if (fileData.processedData?.summary) {
+      details.push(`• Generated a detailed summary`);
     }
-    
-    analysisDetails.push(`\nWhat would you like to know about this video? You can ask me to:
-• Show you the summary
-• Provide specific information about key moments
-• Explain the main topics covered`);
-    
+    details.push(`\nAsk me to:\n• Show the summary\n• Key moments\n• Main topics`);
+
     const aiMessage = {
       id: Date.now() + 1,
-      text: `${initialAnalysis}\n\n${analysisDetails.join('\n')}`,
+      text: `Processed "${fileData.name}" (${(fileData.size / (1024 * 1024)).toFixed(2)} MB)\n\n${details.join('\n')}`,
       sender: "ai",
       timestamp: new Date().toISOString()
     };
-    
-    setMessages(prevMessages => [...prevMessages, aiMessage]);
-  };
-  
-  const getAiResponse = (userMessage, videoData) => {
-    const lowerCaseMessage = userMessage.toLowerCase();
-    
-    if (lowerCaseMessage.includes('hello') || lowerCaseMessage.includes('hi')) {
-      return "Hello! I'm your video summarization assistant. Would you like to upload a video for me to analyze?";
-    } else if (lowerCaseMessage.includes('thank')) {
-      return "You're welcome! Let me know if you need anything else.";
-    } else if (!videoData && (lowerCaseMessage.includes('summarize') || lowerCaseMessage.includes('video'))) {
-      return "I'd be happy to summarize a video for you. Please click the 'Add MP4 File' button to upload your video.";
-    } else if (videoData && lowerCaseMessage.includes('how') && lowerCaseMessage.includes('long')) {
-      // Return info about video length if we have it
-      if (videoData.processedData && videoData.processedData.transcript_segments &&
-          videoData.processedData.transcript_segments.length > 0) {
-        const lastSegment = videoData.processedData.transcript_segments[videoData.processedData.transcript_segments.length - 1];
-        return `Your video is approximately ${lastSegment.end} in length.`;
-      }
-      return "I've processed your video, but I don't have exact information about its length.";
-    } else if (videoData) {
-      return "I've analyzed your video. Would you like to see the summary, key frames, or specific information about it?";
-    } else {
-      return "I'm here to help analyze and summarize videos. Would you like to upload a video file?";
-    }
+
+    setMessages(prev => [...prev, userMessage, aiMessage]);
   };
 
   return (
@@ -235,7 +206,7 @@ function ChatBot() {
           onAttachmentClick={() => setIsModalOpen(true)}
         />
       </div>
-      
+
       <FileModal 
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
