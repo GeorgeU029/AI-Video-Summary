@@ -10,7 +10,7 @@ function FileModal({ isOpen, onClose, onFileUpload }) {
   const fileInputRef = useRef(null);
 
   // API URL - update this to point to your local server
-  const API_URL = 'http://localhost:5000';
+  const API_URL = 'http://localhost:5000/api';
 
   // Handle drag events
   const handleDrag = (e) => {
@@ -55,7 +55,7 @@ function FileModal({ isOpen, onClose, onFileUpload }) {
         file.name.endsWith('.mkv')) {
       setSelectedFile(file);
     } else {
-      alert('Please select a valid video file (MP4, AVI, MOV, or MKV)');
+      setErrorMessage('Please select a valid video file (MP4, AVI, MOV, or MKV)');
     }
   };
 
@@ -73,105 +73,92 @@ function FileModal({ isOpen, onClose, onFileUpload }) {
     setIsLoading(true);
     setUploadProgress(0);
     
-    // Debug logs
-    console.log('Selected file:', selectedFile);
-    console.log('API URL:', API_URL);
-    
     try {
-      // Create FormData object for file upload
+      // STEP 1: Upload the file
+      setUploadProgress(10);
+      console.log('Uploading file to:', `${API_URL}/upload`);
+      
+      // Create FormData object with the exact parameter name expected by the server
       const formData = new FormData();
       formData.append('file', selectedFile);
       
-      // Step 1: Upload the file - make sure we're using the correct endpoint
-      setUploadProgress(10);
-      console.log('Uploading file to:', `${API_URL}/api/upload`);
+      // Use XMLHttpRequest for better upload progress tracking and debugging
+      const xhr = new XMLHttpRequest();
       
-      const uploadResponse = await fetch(`${API_URL}/api/upload`, {
-        method: 'POST',
-        body: formData
-      });
-
-      // Better error handling
-      if (!uploadResponse.ok) {
-        let errorDetail = '';
-        try {
-          // Try to get more details from the error response
-          const errorBody = await uploadResponse.text();
-          console.error('Error response:', errorBody);
-          errorDetail = errorBody;
-        } catch (e) {
-          console.error('Could not read error response:', e);
+      // Set up upload progress tracking
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          setUploadProgress(percentComplete < 90 ? percentComplete : 90);
         }
-        throw new Error(`Upload failed (${uploadResponse.status} ${uploadResponse.statusText}): ${errorDetail}`);
-      }
-
-      const uploadData = await uploadResponse.json();
+      });
+      
+      // Create a promise to handle the XHR request
+      const uploadPromise = new Promise((resolve, reject) => {
+        xhr.onload = function() {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const response = JSON.parse(xhr.responseText);
+              resolve(response);
+            } catch (e) {
+              reject(new Error(`Invalid JSON response: ${xhr.responseText}`));
+            }
+          } else {
+            reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
+          }
+        };
+        
+        xhr.onerror = function() {
+          reject(new Error('Network error during upload'));
+        };
+      });
+      
+      // Open and send the request
+      xhr.open('POST', `${API_URL}/upload`, true);
+      xhr.send(formData);
+      
+      // Wait for the upload to complete
+      const uploadData = await uploadPromise;
       console.log('Upload success:', uploadData);
-      setUploadProgress(50);
       
-      // Step 2: Process the uploaded video
-      // Handle both filename and filepath scenarios
-      let filenameToProcess;
-      
-      // Log full response for debugging
-      console.log('Full upload response:', uploadData);
-      
-      // Check if we have the filename directly
-      if (uploadData.filename) {
-        filenameToProcess = uploadData.filename;
-        console.log('Using filename from server response:', filenameToProcess);
-      } 
-      // Fallback to extracting from filepath if filename is not provided
-      else if (uploadData.filepath) {
-        const serverFilepath = uploadData.filepath;
-        filenameToProcess = serverFilepath.split('/').pop().split('\\').pop();
-        console.log('Extracted filename from filepath:', filenameToProcess);
-      } else {
-        throw new Error('Server did not return filename or filepath');
+      // Extract the filename from the response
+      if (!uploadData.filename) {
+        throw new Error('Server did not return a filename');
       }
       
-      console.log('Processing file with filename:', filenameToProcess);
+      const serverFilename = uploadData.filename;
       
-      const processResponse = await fetch(`${API_URL}/api/process`, {
+      // STEP 2: Process the uploaded file
+      setUploadProgress(95);
+      console.log('Processing file:', serverFilename);
+      
+      const processResponse = await fetch(`${API_URL}/process`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          filename: filenameToProcess
+          filename: serverFilename
         })
       });
 
-      // Better error handling for processing
+      // Handle processing errors
       if (!processResponse.ok) {
-        let errorDetail = '';
-        try {
-          const errorBody = await processResponse.json();
-          console.error('Processing error response:', errorBody);
-          errorDetail = JSON.stringify(errorBody);
-        } catch (e) {
-          try {
-            // Try as text if JSON fails
-            const textBody = await processResponse.text();
-            errorDetail = textBody;
-          } catch (textError) {
-            console.error('Could not read error response:', e);
-            errorDetail = 'Unknown error';
-          }
-        }
-        throw new Error(`Processing failed (${processResponse.status} ${processResponse.statusText}): ${errorDetail}`);
+        const errorText = await processResponse.text();
+        throw new Error(`Processing failed (${processResponse.status}): ${errorText}`);
       }
 
       const processData = await processResponse.json();
       console.log('Process success:', processData);
       setUploadProgress(100);
       
-      // Call onFileUpload with all the data from processing
+      // Call onFileUpload with the data
       onFileUpload({
         name: selectedFile.name,
         size: selectedFile.size,
         type: selectedFile.type,
-        processedData: processData
+        processedData: processData,
+        filename: serverFilename // Store the server filename for later use
       });
       
       // Close modal
