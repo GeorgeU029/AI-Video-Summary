@@ -241,6 +241,7 @@ function ChatBot() {
     if (processedFileData.processedData?.frames) {
       setVideoFrames(processedFileData.processedData.frames);
     }
+
   };
 
   return (

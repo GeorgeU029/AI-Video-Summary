@@ -146,6 +146,7 @@ function FileModal({ isOpen, onClose, onFileUpload }) {
       if (!processResponse.ok) {
         const errorText = await processResponse.text();
         throw new Error(`Processing failed (${processResponse.status}): ${errorText}`);
+
       }
 
       const processData = await processResponse.json();

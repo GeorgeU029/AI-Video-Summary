@@ -57,6 +57,7 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
 logger.info(f"Loading Whisper model: {WHISPER_MODEL}...")
 model = whisper.load_model(WHISPER_MODEL)  # Options: base, small, medium, large
+
 logger.info("Whisper model loaded.")
 
 # === HELPERS ===
@@ -160,6 +161,7 @@ def sanitize_path(path):
     abs_path = os.path.abspath(path)
     return abs_path if abs_path.startswith(base_dir) else None
 
+
 # === ROUTES ===
 @app.route('/')
 def root():
@@ -172,6 +174,7 @@ def root():
             '/api/summary - Generate or retrieve summaries (POST only)',
             '/api/chat - Chat with summary context (POST only)',
             '/api/videos - List processed videos (GET only)'
+
         ]
     })
 
@@ -182,11 +185,11 @@ def upload_video():
 
     if 'file' not in request.files:
         logger.error("No file part in request")
+
         return jsonify({'error': 'No file part'}), 400
 
     file = request.files['file']
     if file.filename == '':
-        logger.error("No selected file")
         return jsonify({'error': 'No selected file'}), 400
 
     if file and allowed_file(file.filename):
@@ -219,6 +222,7 @@ def upload_video():
         extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else 'unknown'
         logger.error(f"File type not allowed: {extension}")
         return jsonify({'error': f'File type not allowed: {extension}. Allowed types: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
+
 
 @app.route('/api/process', methods=['POST', 'OPTIONS'])
 def process_video():
@@ -404,6 +408,7 @@ def list_videos():
         logger.error(f"Error listing videos: {e}")
         return jsonify({'error': str(e)}), 500
 
+
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', os.getenv("ALLOWED_ORIGINS", "*"))
@@ -417,3 +422,4 @@ if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     debug = os.getenv("DEBUG", "false").lower() == "true"
     app.run(host=host, port=port, debug=debug)
+
