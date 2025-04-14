@@ -16,6 +16,7 @@ function ChatBot() {
   ]);
   const [videoFrames, setVideoFrames] = useState([]);
   const [videoData, setVideoData] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const API_URL = 'http://localhost:5000/api';
 
@@ -54,11 +55,12 @@ function ChatBot() {
         };
         setMessages(prev => [...prev, loadingMessage]);
 
-        const response = await fetch(`${API_URL}/summarize`, {
+        // FIXED: Changed from /summarize to /summary and updated request body
+        const response = await fetch(`${API_URL}/summary`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            transcript: videoData.processedData.transcript_text
+            filename: videoData.filename || videoData.processedData.filename
           })
         });
 
@@ -97,6 +99,24 @@ function ChatBot() {
         }]);
         return;
       }
+    }
+
+    // Command to show transcript
+    if (messageText.toLowerCase().includes('transcript') && videoData?.processedData?.transcript_text) {
+      const transcript = videoData.processedData.transcript_text;
+      const truncatedTranscript = transcript.length > 1000 
+        ? transcript.substring(0, 1000) + "...\n\n(Transcript truncated for readability)" 
+        : transcript;
+      
+      const aiMessage = {
+        id: Date.now() + 1,
+        text: "## Video Transcript\n\n" + truncatedTranscript,
+        sender: "ai",
+        timestamp: new Date().toISOString()
+      };
+      
+      setMessages(prev => [...prev, aiMessage]);
+      return;
     }
 
     // Frame/timestamp logic
@@ -161,39 +181,67 @@ function ChatBot() {
     }
   };
 
-  const handleFileUpload = (fileData) => {
-    setVideoData(fileData);
-    if (fileData.processedData?.frames) {
-      setVideoFrames(fileData.processedData.frames);
-    }
-
-    const userMessage = {
-      id: Date.now(),
-      text: `I've uploaded "${fileData.name}" for summarization.`,
+  // UPDATED: handleFileUpload to receive processed data from FileModal
+  const handleFileUpload = async (processedFileData) => {
+    // Close the modal immediately
+    setIsModalOpen(false);
+    
+    // Add a processing message to the chat
+    const processingId = Date.now();
+    const userMessageId = processingId - 1;
+    
+    // Add user message showing upload
+    setMessages(prev => [...prev, {
+      id: userMessageId,
+      text: `I've uploaded "${processedFileData.name}" for summarization.`,
       sender: "user",
       timestamp: new Date().toISOString()
-    };
+    }]);
+    
+    // Add success message
+    // Build success message with proper formatting
+    let details = [];
+    
+    if (processedFileData.processedData?.transcript_text) {
+      const wordCount = processedFileData.processedData.transcript_text.split(/\s+/).length;
+      details.push(`• Transcribed approximately ${wordCount} words`);
+    }
+    
+    if (processedFileData.processedData?.frames) {
+      details.push(`• Extracted ${processedFileData.processedData.frames.length} key frames`);
+    }
 
-    const details = [];
-    if (fileData.processedData?.transcript_segments) {
-      details.push(`• Transcribed ${fileData.processedData.transcript_segments.length} speech segments`);
-    }
-    if (fileData.processedData?.frames) {
-      details.push(`• Extracted ${fileData.processedData.frames.length} key frames`);
-    }
-    if (fileData.processedData?.summary) {
-      details.push(`• Generated a detailed summary`);
-    }
-    details.push(`\nAsk me to:\n• Show the summary\n• Key moments\n• Main topics`);
+    const successMessage = [
+      `## Video Processing Complete`,
+      ``,
+      `I've successfully processed "${processedFileData.name}" (${(processedFileData.size / (1024 * 1024)).toFixed(2)} MB).`,
+      ``,
+      ...details,
+      ``,
+      `### What would you like to do next?`,
+      ``,
+      `• Generate a summary`,
+      ``,
+      `• Show the transcript`,
+      ``,
+      `• Ask questions about the content`
+    ].join('\n');
 
-    const aiMessage = {
-      id: Date.now() + 1,
-      text: `Processed "${fileData.name}" (${(fileData.size / (1024 * 1024)).toFixed(2)} MB)\n\n${details.join('\n')}`,
+    // Add the success message to chat
+    setMessages(prev => [...prev, {
+      id: processingId,
+      text: successMessage,
       sender: "ai",
       timestamp: new Date().toISOString()
-    };
+    }]);
+    
+    // Save the data
+    setVideoData(processedFileData);
+    
+    if (processedFileData.processedData?.frames) {
+      setVideoFrames(processedFileData.processedData.frames);
+    }
 
-    setMessages(prev => [...prev, userMessage, aiMessage]);
   };
 
   return (
@@ -204,6 +252,7 @@ function ChatBot() {
         <MessageInput 
           onSendMessage={handleSendMessage} 
           onAttachmentClick={() => setIsModalOpen(true)}
+          disabled={isProcessing}
         />
       </div>
 
